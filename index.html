@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morley's Trisector Theorem</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #f5f0e8;
+      --fg:      #2b2b2b;
+      --accent:  #8b1a1a;
+    }
+    :root.dark {
+      --bg:      #2b2b2b;
+      --fg:      #f0f0f0;
+      --accent:  #e6c84a;
+    }
+
+    body {
+      background: var(--bg);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: default;
+    }
+    canvas.dragging { cursor: grabbing; }
+
+    /* ── Info pane ── */
+    #info {
+      position: fixed;
+      top: 18px;
+      left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      pointer-events: none;
+    }
+    #info a {
+      pointer-events: all;
+      font-size: 13px;
+      color: var(--fg);
+      text-decoration: none;
+      opacity: 0.65;
+      transition: opacity .15s;
+      letter-spacing: .02em;
+    }
+    #info a:hover { opacity: 1; text-decoration: underline; }
+    #info .label {
+      font-size: 11px;
+      color: var(--fg);
+      opacity: 0.4;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    /* ── Theme button ── */
+    #theme-btn {
+      position: fixed;
+      top: 14px;
+      right: 18px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      padding: 4px;
+      color: var(--fg);
+      opacity: 0.75;
+      transition: opacity .15s, transform .2s, color .15s;
+      user-select: none;
+    }
+    :root.dark #theme-btn { color: #e6c84a; }
+    #theme-btn:hover { opacity: 1; transform: scale(1.15); }
+  </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="info">
+  <span class="label">Morley's Trisector Theorem</span>
+  <a href="https://en.wikipedia.org/wiki/Morley%27s_trisector_theorem" target="_blank" rel="noopener">Wikipedia</a>
+  <a href="https://github.com/berkgaut/morley-trisector" target="_blank" rel="noopener">GitHub</a>
+</div>
+
+<button id="theme-btn" aria-label="Toggle theme" title="Toggle theme">&#9790;</button>
+
+<script>
+/* ─────────────────────────────────────────────
+   Morley's Trisector Theorem – interactive demo
+   ───────────────────────────────────────────── */
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const root   = document.documentElement;
+const btn    = document.getElementById('theme-btn');
+
+// ── Theme ──────────────────────────────────────
+let dark = false;
+
+function applyTheme() {
+  if (dark) {
+    root.classList.add('dark');
+    btn.innerHTML = '&#9728;';   // sun (shown when dark → click to go light)
+    btn.title = 'Switch to light theme';
+  } else {
+    root.classList.remove('dark');
+    btn.innerHTML = '&#9790;';   // moon (shown when light → click to go dark)
+    btn.title = 'Switch to dark theme';
+  }
+  draw();
+}
+
+btn.addEventListener('click', () => { dark = !dark; applyTheme(); });
+
+function colors() {
+  return dark
+    ? { bg: '#2b2b2b', fg: '#f0f0f0', accent: '#e6c84a' }
+    : { bg: '#f5f0e8', fg: '#2b2b2b', accent: '#8b1a1a' };
+}
+
+// ── Canvas sizing ──────────────────────────────
+function resize() {
+  canvas.width  = window.innerWidth  * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+  canvas.style.width  = window.innerWidth  + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  initDefaultPoints();
+  draw();
+}
+
+window.addEventListener('resize', resize);
+
+// ── Triangle vertices ──────────────────────────
+// Stored in CSS-pixel coordinates
+let pts = null;  // null until first resize
+
+function initDefaultPoints(force = false) {
+  if (pts && !force) return;  // keep user positions on resize
+  const W = window.innerWidth, H = window.innerHeight;
+  const cx = W / 2, cy = H / 2;
+  const r  = Math.min(W, H) * 0.35;
+  // Slightly irregular triangle so all trisectors are visible
+  pts = [
+    { x: cx,              y: cy - r * 1.05 },
+    { x: cx - r * 0.95,   y: cy + r * 0.70 },
+    { x: cx + r * 0.85,   y: cy + r * 0.60 },
+  ];
+}
+
+// ── Math helpers ───────────────────────────────
+
+function vec(a, b)  { return { x: b.x - a.x, y: b.y - a.y }; }
+function len(v)     { return Math.hypot(v.x, v.y); }
+function norm(v)    { const l = len(v); return { x: v.x/l, y: v.y/l }; }
+function add(a, b)  { return { x: a.x + b.x, y: a.y + b.y }; }
+function scale(v,s) { return { x: v.x*s, y: v.y*s }; }
+function dot(a, b)  { return a.x*b.x + a.y*b.y; }
+
+// Angle at vertex b in triangle a-b-c, in radians
+function angleAt(a, b, c) {
+  const u = norm(vec(b, a));
+  const v = norm(vec(b, c));
+  return Math.acos(Math.min(1, Math.max(-1, dot(u, v))));
+}
+
+// Rotate vector v by angle θ
+function rotate(v, θ) {
+  return {
+    x: v.x * Math.cos(θ) - v.y * Math.sin(θ),
+    y: v.x * Math.sin(θ) + v.y * Math.cos(θ),
+  };
+}
+
+// Intersection of two lines: p + t*d1  and  q + s*d2
+// Returns the intersection point or null
+function lineIntersect(p, d1, q, d2) {
+  const cross = d1.x * d2.y - d1.y * d2.x;
+  if (Math.abs(cross) < 1e-10) return null;
+  const dx = q.x - p.x, dy = q.y - p.y;
+  const t  = (dx * d2.y - dy * d2.x) / cross;
+  return { x: p.x + t * d1.x, y: p.y + t * d1.y };
+}
+
+/*  Compute the 3 Morley triangle vertices and the 6 trisector segments.
+
+    Naming: A=pts[0], B=pts[1], C=pts[2].
+
+    For each vertex V with interior angle α, we compute two trisector
+    directions using the rotation sense of the interior angle:
+
+      trisectorDirs(V, prev, next, α)
+        toNext = unit vector V→next
+        sign   = sign of cross(toNext, toPrev)   [determines inward rotation]
+        d0     = rotate(toNext, sign·α/3)   — ray closer to side V-next
+        d1     = rotate(toNext, sign·2α/3)  — ray closer to side V-prev
+
+    Morley vertices (verified by exhaustive pairing to yield equilateral result):
+      PA (opposite A) = B·d0  ∩  C·d1
+      PB (opposite B) = A·d1  ∩  C·d0
+      PC (opposite C) = A·d0  ∩  B·d1
+
+    Each of the 6 rays is clipped to the Morley vertex it terminates at.
+*/
+function computeMorley(A, B, C) {
+  const αA = angleAt(B, A, C);
+  const αB = angleAt(A, B, C);
+  const αC = angleAt(A, C, B);
+
+  function trisectorDirs(vertex, prev, next, angle) {
+    const toNext = norm(vec(vertex, next));
+    const toPrev = norm(vec(vertex, prev));
+    const cross  = toNext.x * toPrev.y - toNext.y * toPrev.x;
+    const sign   = cross > 0 ? 1 : -1;
+    const d0 = rotate(toNext, sign * angle / 3);
+    const d1 = rotate(toNext, sign * 2 * angle / 3);
+    return [d0, d1];
+  }
+
+  // A: next=B, prev=C
+  const [dA0, dA1] = trisectorDirs(A, C, B, αA);
+  // B: next=C, prev=A
+  const [dB0, dB1] = trisectorDirs(B, A, C, αB);
+  // C: next=A, prev=B
+  const [dC0, dC1] = trisectorDirs(C, B, A, αC);
+
+  // Morley triangle vertices
+  const PA = lineIntersect(B, dB0, C, dC1);  // opposite A
+  const PB = lineIntersect(A, dA1, C, dC0);  // opposite B
+  const PC = lineIntersect(A, dA0, B, dB1);  // opposite C
+
+  // 6 trisector segments, each drawn vertex → Morley point
+  const rays = [
+    { from: A, to: PB },   // A·d1 → PB
+    { from: A, to: PC },   // A·d0 → PC
+    { from: B, to: PA },   // B·d0 → PA
+    { from: B, to: PC },   // B·d1 → PC
+    { from: C, to: PA },   // C·d1 → PA
+    { from: C, to: PB },   // C·d0 → PB
+  ];
+
+  return { morleyPts: [PA, PB, PC], rays };
+}
+
+// ── Drawing ────────────────────────────────────
+
+const HANDLE_HALF = 5;   // half-size of draggable square handle
+const DOT_R       = 3.5; // radius of Morley-point circles
+
+function draw() {
+  if (!pts) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  const c = colors();
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = c.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const [A, B, C] = pts;
+  const { morleyPts, rays } = computeMorley(A, B, C);
+  const [PA, PB, PC] = morleyPts;
+
+  // Guard: if any intersection is null (degenerate triangle) skip
+  if (!PA || !PB || !PC) return;
+
+  // ── Main triangle ──────────────────────────────
+  ctx.beginPath();
+  ctx.moveTo(A.x, A.y);
+  ctx.lineTo(B.x, B.y);
+  ctx.lineTo(C.x, C.y);
+  ctx.closePath();
+  ctx.strokeStyle = c.fg;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // ── Trisector segments ─────────────────────────
+  ctx.strokeStyle = c.fg;
+  ctx.lineWidth = 0.9;
+  ctx.setLineDash([]);
+  for (const ray of rays) {
+    if (!ray.to) continue;
+    ctx.beginPath();
+    ctx.moveTo(ray.from.x, ray.from.y);
+    ctx.lineTo(ray.to.x,   ray.to.y);
+    ctx.stroke();
+  }
+
+  // ── Inner (Morley) triangle ────────────────────
+  ctx.beginPath();
+  ctx.moveTo(PA.x, PA.y);
+  ctx.lineTo(PB.x, PB.y);
+  ctx.lineTo(PC.x, PC.y);
+  ctx.closePath();
+  ctx.strokeStyle = c.fg;
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  // ── Morley-point dots ──────────────────────────
+  ctx.strokeStyle = c.accent;
+  ctx.fillStyle = '#faebd7';   // antique white
+  ctx.lineWidth = 1.2;
+  for (const pt of [PA, PB, PC]) {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, DOT_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ── Vertex handles (squares) ───────────────────
+  ctx.strokeStyle = c.accent;
+  ctx.fillStyle = '#faebd7';   // antique white
+  ctx.lineWidth = 1.5;
+  for (const pt of [A, B, C]) {
+    const h = HANDLE_HALF;
+    ctx.fillRect(pt.x - h, pt.y - h, h * 2, h * 2);
+    ctx.strokeRect(pt.x - h, pt.y - h, h * 2, h * 2);
+  }
+}
+
+// ── Drag handling ──────────────────────────────
+
+let dragging = -1;
+
+function hitTest(cx, cy) {
+  const HIT = 14; // pixels
+  for (let i = 0; i < pts.length; i++) {
+    const dx = pts[i].x - cx, dy = pts[i].y - cy;
+    if (Math.hypot(dx, dy) < HIT) return i;
+  }
+  return -1;
+}
+
+function pointerPos(e) {
+  const r = canvas.getBoundingClientRect();
+  // clientX/Y are already in CSS pixels; canvas is also CSS pixels
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+canvas.addEventListener('pointerdown', e => {
+  const p = pointerPos(e);
+  dragging = hitTest(p.x, p.y);
+  if (dragging >= 0) {
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('dragging');
+    e.preventDefault();
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  if (dragging < 0) return;
+  const p = pointerPos(e);
+  pts[dragging].x = p.x;
+  pts[dragging].y = p.y;
+  draw();
+});
+
+canvas.addEventListener('pointerup', () => {
+  dragging = -1;
+  canvas.classList.remove('dragging');
+});
+
+canvas.addEventListener('pointercancel', () => {
+  dragging = -1;
+  canvas.classList.remove('dragging');
+});
+
+// Change cursor on hover
+canvas.addEventListener('mousemove', e => {
+  if (dragging >= 0) return;
+  const p = pointerPos(e);
+  canvas.style.cursor = hitTest(p.x, p.y) >= 0 ? 'grab' : 'default';
+});
+
+// ── Boot ───────────────────────────────────────
+resize();
+applyTheme();
+</script>
+</body>
+</html>
