@@ -40,6 +40,11 @@ if [[ -z "$DISTRIBUTION_ARN" || "$DISTRIBUTION_ARN" == "None" ]]; then
   exit 1
 fi
 DISTRIBUTION_ID="${DISTRIBUTION_ARN##*/}"
+DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution \
+  --id "$DISTRIBUTION_ID" \
+  --profile "$AWS_PROFILE" \
+  --query "Distribution.DomainName" \
+  --output text)
 echo "  distribution: $DISTRIBUTION_ID"
 
 # ── Copy files to S3 ──────────────────────────────────────────────────────────
@@ -67,4 +72,4 @@ echo "  invalidation complete."
 
 echo ""
 echo "Deployment done."
-echo "  https://dlz7d8tl3feij.cloudfront.net/${S3_PREFIX}/"
+echo "  https://${DISTRIBUTION_DOMAIN}/${S3_PREFIX}/"
